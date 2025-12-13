@@ -6,7 +6,3 @@ secondaryBackgroundColor = "#243D42"
 textColor = "#E5E7EB"
 font = "sans serif"
 
-[server]
-headless = false
-port = 8506
-
