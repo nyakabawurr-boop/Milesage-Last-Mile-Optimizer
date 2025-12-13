@@ -1040,7 +1040,7 @@ def data_filtering_ui(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def clustering_ui(df: pd.DataFrame) -> pd.DataFrame:
+def clustering_ui(df: pd.DataFrame, use_normalized: bool = False) -> pd.DataFrame:
     """UI for depot/region clustering options."""
     if df is None or df.empty:
         return df
@@ -1048,6 +1048,21 @@ def clustering_ui(df: pd.DataFrame) -> pd.DataFrame:
     st.markdown('<div class="milesage-card">', unsafe_allow_html=True)
     st.markdown("### 🌐 Depot/Region Clustering (Optional)")
     st.markdown("Group stops into clusters for multi-depot routing. Useful for large-scale scenarios.")
+    
+    # Check if we have lat/lon columns (either normalized or from mapping)
+    lat_col = None
+    lon_col = None
+    
+    if use_normalized:
+        # Using normalized dataframe (has 'lat' and 'lon')
+        if 'lat' in df.columns and 'lon' in df.columns:
+            lat_col = 'lat'
+            lon_col = 'lon'
+    else:
+        # Using raw dataframe - try to find lat/lon from column mapping
+        mapping = st.session_state.get('column_mapping', {})
+        lat_col = mapping.get('lat')
+        lon_col = mapping.get('lon')
     
     clustering_method = st.radio(
         "Clustering Method",
@@ -1063,6 +1078,11 @@ def clustering_ui(df: pd.DataFrame) -> pd.DataFrame:
     df_result = df.copy()
     
     if clustering_method == "kmeans":
+        if not lat_col or not lon_col:
+            st.warning("⚠️ Please map latitude and longitude columns first, or apply clustering after normalization.")
+            st.markdown('</div>', unsafe_allow_html=True)
+            return df
+        
         n_clusters = st.number_input(
             "Number of Clusters (K)",
             min_value=2,
@@ -1075,7 +1095,20 @@ def clustering_ui(df: pd.DataFrame) -> pd.DataFrame:
         
         if st.button("🔄 Apply K-means Clustering", use_container_width=True):
             try:
-                df_result = apply_kmeans_clustering(df.copy(), n_clusters)
+                # Create a temporary dataframe with lat/lon for clustering
+                if use_normalized:
+                    df_result = apply_kmeans_clustering(df.copy(), n_clusters)
+                else:
+                    # Use the mapped column names
+                    temp_df = df.copy()
+                    temp_df['lat'] = df[lat_col]
+                    temp_df['lon'] = df[lon_col]
+                    df_result = apply_kmeans_clustering(temp_df, n_clusters)
+                    # Keep original column names but add cluster_id
+                    cluster_id_col = df_result['cluster_id'].copy()
+                    df_result = df.copy()
+                    df_result['cluster_id'] = cluster_id_col
+                
                 st.success(f"✅ K-means clustering applied! Created {n_clusters} clusters.")
                 st.session_state.clustering_method = "kmeans"
                 st.rerun()
@@ -2036,12 +2069,15 @@ def main():
             if current_df is not None:
                 current_df = data_filtering_ui(current_df)
             
-            # Clustering UI
-            if current_df is not None:
-                current_df = clustering_ui(current_df)
-            
             # Then show column mapping
             normalized_df, norm_error = column_mapping_ui(current_df)
+            
+            # Clustering UI (after normalization so we have lat/lon columns)
+            if normalized_df is not None:
+                normalized_df = clustering_ui(normalized_df, use_normalized=True)
+                # Update session state if clustering was applied
+                if 'cluster_id' in normalized_df.columns:
+                    st.session_state.normalized_df = normalized_df
             if norm_error:
                 st.error(f"❌ {norm_error}")
     
