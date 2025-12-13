@@ -124,7 +124,11 @@ def generate_pdf_report(
     pdf.cell(0, 8, f"Vehicle Capacity: {model_params.get('vehicle_capacity', 'N/A')}", ln=1)
     pdf.cell(0, 8, f"Max Route Duration: {model_params.get('max_route_duration_hours', 'N/A')} hours", ln=1)
     
-    return pdf.output(dest='S').encode('latin-1')
+    # pdf.output(dest='S') returns bytes/bytearray - convert to bytes if needed
+    pdf_bytes = pdf.output(dest='S')
+    if isinstance(pdf_bytes, bytearray):
+        return bytes(pdf_bytes)
+    return pdf_bytes
 
 
 def render_export_ui(solution: Dict, df: pd.DataFrame, config: Dict, scenario_name: str = "Current"):
