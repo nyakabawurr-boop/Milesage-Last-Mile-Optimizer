@@ -8,4 +8,6 @@ xlrd>=2.0.0
 odfpy>=1.4.0
 folium>=0.14.0
 streamlit-folium>=0.15.0
+scikit-learn>=1.0.0
+fpdf2>=2.5.0
 

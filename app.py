@@ -36,6 +36,16 @@ try:
         generate_business_summary
     )
     from auto_config import auto_configure_parameters, run_vrp_with_auto_relaxation
+    from scenario_manager import render_scenario_manager_ui, compare_scenarios
+    from clustering import (
+        apply_kmeans_clustering,
+        apply_column_based_clustering,
+        split_dataframe_by_cluster,
+        aggregate_cluster_solutions
+    )
+    from time_window_helper import render_time_window_helper_ui
+    from utilization_metrics import render_utilization_ui
+    from export_utils import render_export_ui
 except ImportError as e:
     st.error(f"Error importing modules: {e}. Please ensure all required files are present.")
     st.stop()
@@ -914,6 +924,16 @@ if 'config' not in st.session_state:
         'fixed_cost_per_vehicle': 50.0,
         'cost_per_hour': 25.0
     }
+if 'scenarios' not in st.session_state:
+    st.session_state.scenarios = {}
+if 'current_step' not in st.session_state:
+    st.session_state.current_step = 1  # Wizard step
+if 'clustering_method' not in st.session_state:
+    st.session_state.clustering_method = "none"  # none, kmeans, column
+if 'n_clusters' not in st.session_state:
+    st.session_state.n_clusters = 3
+if 'cluster_column' not in st.session_state:
+    st.session_state.cluster_column = None
 
 
 def load_data() -> Tuple[Optional[pd.DataFrame], Optional[str]]:
@@ -1018,6 +1038,78 @@ def data_filtering_ui(df: pd.DataFrame) -> pd.DataFrame:
         st.markdown('</div>', unsafe_allow_html=True)
     
     return df
+
+
+def clustering_ui(df: pd.DataFrame) -> pd.DataFrame:
+    """UI for depot/region clustering options."""
+    if df is None or df.empty:
+        return df
+    
+    st.markdown('<div class="milesage-card">', unsafe_allow_html=True)
+    st.markdown("### 🌐 Depot/Region Clustering (Optional)")
+    st.markdown("Group stops into clusters for multi-depot routing. Useful for large-scale scenarios.")
+    
+    clustering_method = st.radio(
+        "Clustering Method",
+        options=["none", "kmeans", "column"],
+        format_func=lambda x: {
+            "none": "No clustering (single depot)",
+            "kmeans": "K-means clustering on coordinates",
+            "column": "Use existing column as cluster/region key"
+        }[x],
+        index=["none", "kmeans", "column"].index(st.session_state.clustering_method) if st.session_state.clustering_method in ["none", "kmeans", "column"] else 0
+    )
+    
+    df_result = df.copy()
+    
+    if clustering_method == "kmeans":
+        n_clusters = st.number_input(
+            "Number of Clusters (K)",
+            min_value=2,
+            max_value=20,
+            value=st.session_state.n_clusters,
+            step=1,
+            help="Number of clusters to create using K-means"
+        )
+        st.session_state.n_clusters = n_clusters
+        
+        if st.button("🔄 Apply K-means Clustering", use_container_width=True):
+            try:
+                df_result = apply_kmeans_clustering(df.copy(), n_clusters)
+                st.success(f"✅ K-means clustering applied! Created {n_clusters} clusters.")
+                st.session_state.clustering_method = "kmeans"
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error applying clustering: {e}")
+    
+    elif clustering_method == "column":
+        columns = df.columns.tolist()
+        cluster_column = st.selectbox(
+            "Cluster/Region Column",
+            options=[None] + columns,
+            index=0 if st.session_state.cluster_column is None else 
+                   (columns.index(st.session_state.cluster_column) + 1 if st.session_state.cluster_column in columns else 0),
+            help="Select a column that identifies clusters or regions"
+        )
+        
+        if cluster_column and st.button("🔄 Apply Column-based Clustering", use_container_width=True):
+            try:
+                df_result = apply_column_based_clustering(df.copy(), cluster_column)
+                unique_clusters = df_result['cluster_id'].nunique()
+                st.success(f"✅ Column-based clustering applied! Created {unique_clusters} clusters.")
+                st.session_state.clustering_method = "column"
+                st.session_state.cluster_column = cluster_column
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error applying clustering: {e}")
+    
+    else:
+        st.session_state.clustering_method = "none"
+        if 'cluster_id' in df_result.columns:
+            df_result = df_result.drop(columns=['cluster_id'])
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    return df_result
 
 
 def column_mapping_ui(df: pd.DataFrame) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
@@ -1170,6 +1262,14 @@ def column_mapping_ui(df: pd.DataFrame) -> Tuple[Optional[pd.DataFrame], Optiona
                     st.rerun()
     
     st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Time Window Helper
+    if df is not None and not df.empty:
+        df_with_tw, earliest_col, latest_col = render_time_window_helper_ui(df)
+        if df_with_tw is not None:
+            # Update the dataframe if time windows were generated
+            st.session_state.raw_df = df_with_tw
+            df = df_with_tw
     
     if st.session_state.normalized_df is not None:
         st.markdown("**✅ Normalized Data Preview:**")
@@ -1644,6 +1744,40 @@ def show_results(config: Dict):
         st.markdown(business_summary)
         st.markdown('</div>', unsafe_allow_html=True)
     
+    # Utilization & Fairness Metrics
+    render_utilization_ui(opt_sol)
+    
+    # Scenario Comparison
+    scenario_names = list(st.session_state.get('scenarios', {}).keys())
+    if len(scenario_names) >= 2:
+        st.markdown('<div class="milesage-card">', unsafe_allow_html=True)
+        st.markdown("### 📊 Scenario Comparison")
+        st.markdown("Compare multiple saved scenarios side-by-side.")
+        
+        selected_scenarios = st.multiselect(
+            "Select scenarios to compare (2-3 recommended)",
+            options=scenario_names,
+            max_selections=3,
+            help="Select 2-3 scenarios to compare their KPIs"
+        )
+        
+        if len(selected_scenarios) >= 2:
+            comparison_df = compare_scenarios(selected_scenarios)
+            if not comparison_df.empty:
+                st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Select at least 2 scenarios to compare.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Export Options
+    df_for_export = st.session_state.get('working_df', st.session_state.normalized_df)
+    if df_for_export is not None:
+        scenario_name = "Current"
+        if 'scenarios' in st.session_state and len(st.session_state.scenarios) > 0:
+            # Try to find current scenario name
+            scenario_name = list(st.session_state.scenarios.keys())[-1]
+        render_export_ui(opt_sol, df_for_export, config, scenario_name)
+    
     # Solution tabs
     tab1, tab2 = st.tabs(["🗺️ Route Map", "📋 Route Details"])
     
@@ -1751,6 +1885,51 @@ def show_results(config: Dict):
         st.markdown('</div>', unsafe_allow_html=True)
 
 
+def render_wizard_stepper():
+    """Render wizard stepper UI in sidebar."""
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 🧭 Navigation Wizard")
+    
+    steps = [
+        ("1️⃣", "Upload Data", "Load your dataset or generate sample data"),
+        ("2️⃣", "Map Columns", "Map columns to required schema"),
+        ("3️⃣", "Configure Model", "Set optimization parameters"),
+        ("4️⃣", "View Results", "Review optimization results"),
+    ]
+    
+    for idx, (icon, title, desc) in enumerate(steps, 1):
+        if idx == st.session_state.current_step:
+            st.sidebar.markdown(f"**{icon} {title}** (Current)")
+            st.sidebar.caption(desc)
+        elif idx < st.session_state.current_step:
+            st.sidebar.markdown(f"✅ {icon} {title}")
+        else:
+            st.sidebar.markdown(f"{icon} {title}")
+            st.sidebar.caption(desc)
+    
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        if st.button("⬅️ Back", disabled=(st.session_state.current_step <= 1), use_container_width=True):
+            st.session_state.current_step = max(1, st.session_state.current_step - 1)
+            st.rerun()
+    with col2:
+        if st.button("Next ➡️", disabled=(st.session_state.current_step >= len(steps)), use_container_width=True):
+            st.session_state.current_step = min(len(steps), st.session_state.current_step + 1)
+            st.rerun()
+    
+    # Auto-detect step based on progress
+    if st.sidebar.button("🔄 Auto-detect Step", use_container_width=True):
+        if st.session_state.optimized_solution is not None:
+            st.session_state.current_step = 4
+        elif st.session_state.normalized_df is not None and st.session_state.config.get('n_vehicles'):
+            st.session_state.current_step = 3
+        elif st.session_state.normalized_df is not None:
+            st.session_state.current_step = 2
+        else:
+            st.session_state.current_step = 1
+        st.rerun()
+
+
 def main():
     """Main application entry point."""
     # Page configuration (must be first)
@@ -1763,6 +1942,12 @@ def main():
     
     # Inject custom CSS
     inject_custom_css()
+    
+    # Scenario Manager in Sidebar
+    render_scenario_manager_ui()
+    
+    # Wizard Stepper in Sidebar
+    render_wizard_stepper()
     
     # Title with improved styling
     st.markdown(
@@ -1850,6 +2035,10 @@ def main():
             # Show optional pre-filtering UI for large datasets (non-blocking)
             if current_df is not None:
                 current_df = data_filtering_ui(current_df)
+            
+            # Clustering UI
+            if current_df is not None:
+                current_df = clustering_ui(current_df)
             
             # Then show column mapping
             normalized_df, norm_error = column_mapping_ui(current_df)
