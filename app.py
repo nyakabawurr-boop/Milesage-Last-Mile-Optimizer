@@ -18,6 +18,7 @@ Dependencies:
 import streamlit as st
 import pandas as pd
 import numpy as np
+import re
 from typing import Dict, Optional, Tuple
 from streamlit_folium import st_folium
 
@@ -2049,11 +2050,28 @@ def main():
         # Demo video card
         st.markdown('<div class="milesage-card">', unsafe_allow_html=True)
         st.markdown("#### Demo: Using Your Own Dataset")
-        st.markdown("Paste a video URL (YouTube/MP4) showing how to use Milesage with your data. A default demo is provided.")
-        default_video_url = "https://suffolk.zoom.us/rec/share/Y7lYu7bmiR_qt-qEYMHTZa8-nuwSy0bDa5VP-T2g42kD6xkOWLoqybwPP0XJzNQo.Im4f1mtGKZCS7TaN?startTime=1765682440000"  # Streamlit intro (replace with your demo)
+        st.markdown("Paste a video URL (YouTube/MP4/Google Drive) showing how to use Milesage with your data. A default demo is provided.")
+        default_video_url = "https://drive.google.com/file/d/1DuYUAjJLWbvH37KeRyAUw4fWn3ZNesD0/preview"  # Google Drive video link
         video_url = st.text_input("Demo video URL", value=default_video_url, key="demo_video_url")
         if video_url:
-            st.video(video_url)
+            # Check if it's a Google Drive link
+            if "drive.google.com" in video_url:
+                # Convert Google Drive share link to embed format if needed
+                if "/view" in video_url or "/preview" in video_url:
+                    # Extract file ID from the URL
+                    file_id_match = re.search(r'/d/([a-zA-Z0-9_-]+)', video_url)
+                    if file_id_match:
+                        file_id = file_id_match.group(1)
+                        embed_url = f"https://drive.google.com/file/d/{file_id}/preview"
+                    else:
+                        embed_url = video_url.replace("/view", "/preview")
+                else:
+                    embed_url = video_url
+                # Use iframe for Google Drive videos
+                st.markdown(f'<iframe src="{embed_url}" width="100%" height="480" allow="autoplay"></iframe>', unsafe_allow_html=True)
+            else:
+                # Use st.video for YouTube and direct video links
+                st.video(video_url)
         st.markdown('</div>', unsafe_allow_html=True)
         
         st.info("💡 **Getting Started**: Navigate to the **Data & Mapping** tab to begin!")
