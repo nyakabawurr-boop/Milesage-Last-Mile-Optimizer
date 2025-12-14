@@ -2050,7 +2050,7 @@ def main():
         st.markdown('<div class="milesage-card">', unsafe_allow_html=True)
         st.markdown("#### Demo: Using Your Own Dataset")
         st.markdown("Paste a video URL (YouTube/MP4) showing how to use Milesage with your data. A default demo is provided.")
-        default_video_url = "https://www.youtube.com/watch?v=R2nr1uZ8ffc"  # Streamlit intro (replace with your demo)
+        default_video_url = "https://suffolk.zoom.us/rec/share/Y7lYu7bmiR_qt-qEYMHTZa8-nuwSy0bDa5VP-T2g42kD6xkOWLoqybwPP0XJzNQo.Im4f1mtGKZCS7TaN?startTime=1765682440000"  # Streamlit intro (replace with your demo)
         video_url = st.text_input("Demo video URL", value=default_video_url, key="demo_video_url")
         if video_url:
             st.video(video_url)
